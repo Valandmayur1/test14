@@ -1,0 +1,2893 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Kyros Internal API
+servers:
+  - url: 'http://localhost:4000'
+  - url: 'https://creed.dev.kyros.care'
+  - url: 'https://jim.dev.kyros.care'
+security:
+  - OAuth2:
+      - All
+tags:
+  - name: oauth
+    description: Authentication endpoints
+  - name: care-team
+    description: Endpoints for managing care teams
+  - name: check-in
+    description: All the APIs related to users' check-ins
+  - name: users
+    description: For managing users
+  - name: credentials
+    description: For managing users credentials
+  - name: verification
+    description: For verifying user's identities before doing sensetive actions
+  - name: meets
+    description: For managing meetings between users
+  - name: files
+    description: Endpoints for testing and debugging the S3 integration. These endpoints will not be available in production!
+  - name: relationships
+    description: manages relationships between two or parties
+  - name: billables
+    description: Manages billables for the platform
+  - name: time-tables
+    description: a service for determining calendar availability
+  - name: reporting
+    description: repoting service for admins and other mantenence functions
+paths:
+  /api/v1/oauth/token:
+    post:
+      tags:
+        - oauth
+      summary: Generates an auth_token for the user
+      security: []
+      operationId: createAuthTokenByUsernameAndPassword
+      requestBody:
+        description: The authentication request. Can be either by password or refresh token
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+            examples:
+              Password-Login:
+                value:
+                  username: blah4@nowhere.com
+                  password: '123456789'
+                  client_id: webapp
+                  client_secret: testapp
+                  grant_type: password
+              Refresh-Token-Login:
+                value:
+                  username: blah4@nowhere.com
+                  refresh_token: '123456789'
+                  client_id: webapp
+                  client_secret: testapp
+                  grant_type: refresh_token
+      responses:
+        '200':
+          description: the new auth token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthToken'
+    delete:
+      tags:
+        - oauth
+      summary: Logs the current user out
+      operationId: logoutUser
+      responses:
+        '200':
+          description: User is logged out
+  '/api/v1/care-teams/{care-team_id}':
+    get:
+      tags:
+        - care-team
+      summary: Gets the care-team cooresponding to the care-team_id
+      operationId: getCareTeamById
+      parameters:
+        - in: path
+          name: care-team_id
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: The care team referenced by getCareTeamById
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTeam'
+  /api/v1/care-teams:
+    get:
+      tags:
+        - care-team
+      summary: Lists all the care-teams for the current user
+      operationId: getCareTeams
+      responses:
+        '200':
+          description: The care team referenced by getCareTeamById
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CareTeam'
+    post:
+      tags:
+        - care-team
+      summary: Creates a care team for the current user
+      operationId: createCareTeam
+      requestBody:
+        description: 'An empty object representing the new care team (Note, this is here for future use)'
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  email:
+                    type: string
+            examples:
+              empty_array:
+                value: []
+              completed_array:
+                value:
+                  - name: John Snow
+                    email: youKnowNothing@snow.com
+                  - name: Bran
+                    email: threeEyed@raven.com
+      responses:
+        '200':
+          description: The care-team that was just created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTeam'
+  '/api/v1/care-teams/{care-team_id}/members':
+    post:
+      tags:
+        - care-team
+      summary: Adds care team members and sends and invite to those individuals
+      operationId: addCareTeamMember
+      parameters:
+        - in: path
+          name: care-team_id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        description: One or more members to add to the care team
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/CareTeamMemberRequest'
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/CareTeamMemberRequest'
+      responses:
+        '200':
+          description: List of created invites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CareTeam'
+  '/api/v1/care-teams/{care-team_id}/members/{member_id}':
+    delete:
+      tags:
+        - care-team
+      summary: Removes a care team member from the list
+      operationId: removeCareTeamMember
+      parameters:
+        - in: path
+          name: care-team_id
+          schema:
+            type: string
+          required: true
+        - in: path
+          name: member_id
+          schema:
+            type: string
+          required: true
+      responses:
+        default:
+          description: Success or fail message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+  '/api/v1/care-teams/{invite_hash}':
+    put:
+      tags:
+        - care-team
+      summary: Accepts or declines an invitation
+      security: []
+      description: 'If the invitation is accepted, then the user should be added. If they are not a member of the platform then they should be onboarded and added after onboarding is completed. If the invitation is declined then the member should be removed from the care-team list. After this is completed then the invite_hash should be removed from the database.'
+      operationId: setsCareTeamMemberStatusByInviteHash
+      parameters:
+        - in: path
+          name: invite_hash
+          description: The hash generated when the invite was made
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: status
+          description: Sets the status of the member in the list
+          schema:
+            $ref: '#/components/schemas/InviteStatusEnum'
+          required: true
+      responses:
+        default:
+          description: Success or fail message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+  /api/v1/check-in:
+    post:
+      tags:
+        - check-in
+      summary: Creates a check-in document with associated client userId
+      security: []
+      operationId: createCheckin
+      requestBody:
+        description: Email address of client userId belonging to the check-in document is required - other fields are optional
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                sobriety_reason:
+                  type: string
+                last_use_date:
+                  type: string
+                what_happened:
+                  type: string
+                emoji_mood:
+                  type: number
+                overall_mood:
+                  type: array
+                  items:
+                    type: string
+                challengeId:
+                  type: string
+      responses:
+        '201':
+          description: The created check-in document
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CheckIn'
+        '400':
+          description: An email address must be provided and/or you already started or completed your daily check-in
+        '404':
+          description: No user found with that email address
+        '500':
+          description: An internal server error occured
+  '/api/v1/check-in/{check-in_hash}':
+    get:
+      tags:
+        - check-in
+      summary: Gets a check-in document with a provided hash
+      security: []
+      operationId: getCheckIn
+      parameters:
+        - in: path
+          name: check-in_hash
+          description: The hash to access the associated check-in
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: The check-in document that matches the provided hash
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckIn'
+        '400':
+          description: There is no check-in related to that url. Perhaps it expired?
+        '500':
+          description: An internal server error occured
+  '/api/v1/check-in/{check-in_id}':
+    put:
+      tags:
+        - check-in
+      summary: Updates the check-in document associated with the id provided
+      security: []
+      operationId: updateCheckin
+      parameters:
+        - in: path
+          name: check-in_id
+          description: The id of the check-in document
+          schema:
+            type: string
+          required: true
+      requestBody:
+        description: Check-in document properties to update
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sobriety_reason:
+                  type: string
+                last_use_date:
+                  type: string
+                what_happened:
+                  type: string
+                emoji_mood:
+                  type: number
+                overall_mood:
+                  type: array
+                  items:
+                    type: string
+                challengeId:
+                  type: string
+      responses:
+        '200':
+          description: The updated check-in document
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UpdatedItem'
+        '400':
+          description: An email address must be provided
+        '404':
+          description: No check-in was found
+        '500':
+          description: An internal server error occured
+  '/api/v1/check-in/{check-in_id}/share':
+    post:
+      tags:
+        - check-in
+      summary: Shares a check-in document
+      security: []
+      operationId: shareCheckin
+      parameters:
+        - in: path
+          name: check-in_id
+          description: The id for the check-in object
+          schema:
+            type: string
+          required: true
+      requestBody:
+        description: 'A list of individuals to share with (send either JUST a userId OR first_name, last_name, and email and/or phone_number)'
+        required: false
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CheckInShare'
+      responses:
+        '201':
+          description: Data was inserted successfully and all emails and texts were sent
+        '404':
+          description: There is no user or check-in associated with that id
+        '500':
+          description: Or least one email or text could not be sent or an internal server error occured
+  /api/v1/credentials:
+    post:
+      tags:
+        - credentials
+      summary: Creates a new credential document and returns any applicable information
+      operationId: createCredential
+      requestBody:
+        description: 'Type is required, but everything else is optional and can be omitted until a subsequent PUT request'
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+            examples:
+              drivers_license:
+                value:
+                  credential_type: drivers_license
+                  credential_title: Driver's License
+                  state: Minnesota
+                  number: A123-456-789-123
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              medical_insurance:
+                value:
+                  credential_type: medical_insurance
+                  credential_title: Medical Insurance
+                  insurance_company: Blue Cross Blue Shield
+                  member_id: '58173861'
+                  group_id: '298451093'
+                  plan_id: '2015235'
+                  relationship: Self
+              cprs:
+                value:
+                  credential_type: cprs
+                  credential_title: CPRS
+                  issue_organization: Minnesota Certification Board
+                  mcb_id: '82664'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              cprs-r:
+                value:
+                  credential_type: cprs-r
+                  credential_title: CPRS-R
+                  issue_organization: Refocus Recovery
+                  mcb_id: '82664'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              ladc:
+                value:
+                  credential_type: ladc
+                  credential_title: LADC
+                  issue_organization: Minnesota Certification Board
+                  number: '18358991'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+      responses:
+        '201':
+          description: The created credentials document
+          content:
+            application/json:
+              schema:
+                type: object
+                $ref: '#/components/schemas/CredentialsAny'
+    get:
+      tags:
+        - credentials
+      summary: Retieves a list of credentials for the authenticated user
+      operationId: listAllCredentialsForUser
+      responses:
+        '200':
+          description: Returns a structured set of data concerning which credentials are uploaded for the given user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialsAny'
+  /api/v1/credentials/types:
+    get:
+      tags:
+        - credentials
+      summary: Retieves a list of credentials and the values needed for each one
+      operationId: listAvailableCredentials
+      responses:
+        '200':
+          description: Returns a structured set of data concerning which credentials are available and what fields are required for each
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialsList'
+  '/api/v1/credentials/{credential_id}':
+    get:
+      tags:
+        - credentials
+      summary: Retrieves the specific credential based on provided id
+      operationId: getUserCredentialById
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns a structured set of data concerning the credential information
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - $ref: '#/components/schemas/CredentialsAny'
+                  - $ref: '#/components/schemas/CredentialGet'
+    put:
+      tags:
+        - credentials
+      summary: Updates the specific credential based on provided id
+      operationId: updateUserCredentialById
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Choose the applicable request body example for the type of credential to update
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialsAnyInput'
+            examples:
+              drivers_license:
+                value:
+                  state: Minnesota
+                  number: A123-456-789-123
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              medical_insurance:
+                value:
+                  insurance_company: Blue Cross Blue Shield
+                  member_id: '58173861'
+                  group_id: '298451093'
+                  plan_id: '2015235'
+                  relationship: Self
+              cprs:
+                value:
+                  issue_organization: Minnesota Certification Board
+                  mcb_id: '82664'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              cprs-r:
+                value:
+                  issue_organization: Refocus Recovery
+                  mcb_id: '82664'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+              ladc:
+                value:
+                  issue_organization: Minnesota Certification Board
+                  number: '18358991'
+                  issue_date: MM-DD-YYYY
+                  expiry_date: MM-DD-YYYY
+      responses:
+        '200':
+          description: Returns a structured set of data concerning the credential information
+          content:
+            application/json:
+              schema:
+                type: object
+                allOf:
+                  - $ref: '#/components/schemas/CredentialsAny'
+                  - $ref: '#/components/schemas/CredentialGet'
+    delete:
+      tags:
+        - credentials
+      summary: Deletes the specific credential based on provided id
+      operationId: deleteUserCredentialById
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns OK if successful
+  '/api/v1/credentials/{credential_id}/image/{file_flag}':
+    post:
+      tags:
+        - credentials
+      summary: Adds an image to an exisiting credential
+      operationId: updatePhotoForSpecificCredential
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: file_flag
+          description: The descriptor for the file as defined by the schema in /types
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The file (image or PDF) to change it to
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File was uploaded. Will receive a credential object back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialsAny'
+    get:
+      tags:
+        - credentials
+      summary: Downloads an image from an exisiting credential
+      operationId: getPhotoForSpecificCredential
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: file_flag
+          description: The descriptor for the file as defined by the schema in /types
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The downloaded image from S3
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+    delete:
+      tags:
+        - credentials
+      summary: Deletes an image from an exisiting credential
+      operationId: deletePhotoForSpecificCredential
+      parameters:
+        - in: path
+          name: credential_id
+          description: The id for the credential
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: file_flag
+          description: The descriptor for the file as defined by the schema in /types
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns Ok if successful
+  /api/v1/relationships:
+    get:
+      tags:
+        - relationships
+      summary: Searches for and returns a list of relationships for a user
+      operationId: listRelationships
+      parameters:
+        - in: query
+          name: party_type
+          description: The type of party "orgs" | "users"
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: party_id
+          description: The ID of the party in question
+          required: false
+          schema:
+            type: number
+      responses:
+        '200':
+          description: List of relationships
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ListEnvelope'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Relationship'
+    post:
+      tags:
+        - relationships
+      summary: Adds a relationship between two parties
+      operationId: createRelationship
+      requestBody:
+        description: The relationship to add
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RelationshipCreate'
+      responses:
+        '201':
+          description: The new relationship
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relationship'
+  '/api/v1/relationships/{id}':
+    put:
+      tags:
+        - relationships
+      summary: Updates a relationship
+      operationId: updateRelationshipById
+      parameters:
+        - in: path
+          name: id
+          description: The Relationship ID
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Relationship Status
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  description: ACTIVE or INACTIVE
+      responses:
+        '201':
+          description: The relationship
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relationship'
+    delete:
+      tags:
+        - relationships
+      summary: marks a relationship as INACTIVE
+      operationId: deleteRelationshipById
+      parameters:
+        - in: path
+          name: id
+          description: The Relationship ID
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ok for success
+  /api/v1/users:
+    post:
+      tags:
+        - users
+      summary: Creates a user
+      security: []
+      operationId: createUser
+      requestBody:
+        description: The user object to create
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+            example:
+              email: blah4@nowhere.com
+              date_of_birth: '2000-05-03T17:55:25.363Z'
+              first_name: Some
+              last_name: Guy
+              gender: MALE
+              password: '123456789'
+              phone: '1231231234'
+              intended_role: client
+      responses:
+        '201':
+          description: User was created. Will receive a user object back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    get:
+      tags:
+        - users
+      summary: Lists users on the system
+      operationId: listUsers
+      description: TODO need to define search parameters
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+  '/api/v1/users/{user_id}':
+    get:
+      tags:
+        - users
+      summary: Gets the details on the current user
+      operationId: getUserByMe
+      description: user_id could also be the string 'me' to refer to the logged in user
+      parameters:
+        - in: path
+          name: user_id
+          description: 'The id for the user, could also be ''me'''
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns the user object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    put:
+      tags:
+        - users
+      summary: Changes user data
+      operationId: updates
+      parameters:
+        - in: path
+          name: user_id
+          description: 'The id for the user, could also be ''me'''
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      description: user_id could also be the string 'me' to refer to the logged in user
+      responses:
+        '200':
+          description: Returns the user object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    delete:
+      tags:
+        - users
+      summary: Disables the user account
+      operationId: deleteUserById
+      description: user_id could also be the string 'me' to refer to the logged in user
+      parameters:
+        - in: path
+          name: user_id
+          description: 'The id for the user, could also be ''me'''
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Returns Ok if successful
+  '/api/v1/users/{user_id}/photos':
+    post:
+      tags:
+        - users
+      summary: Changes the user's profile photo
+      operationId: createUserPhotoById
+      parameters:
+        - in: path
+          name: user_id
+          description: 'The id for the user, could also be ''me'''
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The photo to change it to
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Photo was created. Will receive a user object back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    delete:
+      tags:
+        - users
+      summary: Removes the user's profile photo
+      operationId: deleteUserPhotoById
+      parameters:
+        - in: path
+          name: user_id
+          description: 'The id for the user, could also be ''me'''
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Photo was created. Will receive a user object back
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+  '/api/v1/users/photos/{key}':
+    get:
+      tags:
+        - users
+      summary: Downloads a profile photo attached to the key
+      security: []
+      operationId: getProfilePhotoByKey
+      parameters:
+        - in: path
+          name: key
+          description: The temp key for the file with an extension
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile photo
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/users/forgotpassword:
+    post:
+      tags:
+        - users
+      summary: Triggers a password reset link to the email on file
+      operationId: usersTriggerResetPassword
+      security: []
+      requestBody:
+        description: Supply only the email address on file
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserResetPassword'
+      responses:
+        '201':
+          description: Password reset link was successfully sent
+        '400':
+          description: Request failed validation or email address was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdateError'
+    put:
+      tags:
+        - users
+      summary: Updates a users password to the given value
+      operationId: usersProcessResetPassword
+      requestBody:
+        description: Authenticate using hash to reset password
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProcessResetPassword'
+      responses:
+        '200':
+          description: Password was successfully updated
+        '400':
+          description: Request failed validation or password was not updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdateError'
+  /api/v1/users/change_email:
+    post:
+      tags:
+        - users
+      summary: Triggers an email change OTP link sent password reset link to the email on file
+      operationId: usersTriggerChangeEmail
+      requestBody:
+        description: Supply only the email address on file
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                new_email:
+                  type: string
+                new_email_confirm:
+                  type: string
+      responses:
+        '201':
+          description: Change e-mail link was sent to the email address
+        '400':
+          description: Request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    put:
+      tags:
+        - users
+      summary: Updates a users email to the given value
+      operationId: usersProcessChangeEmail
+      security: []
+      requestBody:
+        description: Updates the e-mail address to the previously sent value
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret_hash:
+                  type: string
+      responses:
+        '200':
+          description: Email was succesfully changed
+        '400':
+          description: Request failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+  '/api/v1/users/{user_id}/password':
+    post:
+      tags:
+        - users
+      summary: Changes the user's account password
+      operationId: updateUsersPassword
+      parameters:
+        - in: path
+          name: user_id
+          description: User ID for the users account that will have the password changed
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The info needed to update the users password
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password:
+                  description: The current password on the account as one part of the identity verification
+                  type: string
+                new_password:
+                  description: The password that the account should be updated to use
+                  type: string
+                new_password_confirm:
+                  description: The password that the account should be updated to use (confirm)
+                  type: string
+      responses:
+        '200':
+          description: Changes accepted and processed successfully
+        '400':
+          description: Request failed validation or the request could not be completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+  '/api/v1/users/{user_id}/phone':
+    post:
+      tags:
+        - users
+      summary: Triggers an phone change OTP code to the submitted phone number
+      operationId: usersTriggerChangePhone
+      parameters:
+        - in: path
+          name: user_id
+          description: User ID for the users account that will have the password changed
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Supply the password for identity verification as well as the phone to change to
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                new_phone:
+                  type: string
+                new_phone_confirm:
+                  type: string
+      responses:
+        '201':
+          description: OTP code was sent to the phone number
+        '400':
+          description: Request failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    put:
+      tags:
+        - users
+      summary: Updates a users phone to the given value
+      operationId: usersProcessChangePhone
+      parameters:
+        - in: path
+          name: user_id
+          description: User ID for the users account that will have the password changed
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Updates the phone number to the previously sent value
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                secret_hash:
+                  type: string
+      responses:
+        '200':
+          description: Phone was succesfully changed
+        '400':
+          description: Request failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+  '/api/v1/users/verify/{hash}':
+    get:
+      tags:
+        - users
+      summary: Runs a verification hash via GET
+      operationId: usersVerifyByGet
+      security: []
+      parameters:
+        - in: path
+          name: hash
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Request was successfully processed
+        '400':
+          description: Request failed validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserUpdateError'
+  /api/v1/meets:
+    get:
+      tags:
+        - meets
+      summary: Lists meets that the current user is a part of
+      operationId: listMeets
+      responses:
+        '200':
+          description: List of meets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ListEnvelope'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Meet'
+    post:
+      tags:
+        - meets
+      summary: Creates a meet
+      operationId: createMeet
+      requestBody:
+        description: The meeting to create
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetBase'
+      responses:
+        '201':
+          description: the created meet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  '/api/v1/meets/{meet_id}':
+    get:
+      tags:
+        - meets
+      summary: Gets the details of a meet
+      operationId: getMeetById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The full meet object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    put:
+      tags:
+        - meets
+      summary: Updates a meet
+      operationId: updateMeetById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The meeting data to update
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetUpdate'
+      responses:
+        '200':
+          description: The full meet object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    delete:
+      tags:
+        - meets
+      summary: Cancels a meet
+      operationId: deleteMeetById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ok if successful
+  '/api/v1/meets/{meet_id}/attendees':
+    post:
+      tags:
+        - meets
+      summary: Adds an attendee to a meet
+      operationId: createAttendeeByMeet
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The attendee to add
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetAttendee'
+      responses:
+        '201':
+          description: The meet that was modified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  '/api/v1/meets/{meet_id}/attendees/{attendee_id}':
+    put:
+      tags:
+        - meets
+      summary: 'Updates an attendee, only accepts the state'
+      operationId: updateMeetAttendeeById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: attendee_id
+          description: The attendee id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The attendee information
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetAttendee'
+      responses:
+        '201':
+          description: The meet data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    delete:
+      tags:
+        - meets
+      summary: Deletes an Attendee
+      operationId: deleteMeetAttendeeById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: attendee_id
+          description: The attendee id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The meet data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  '/api/v1/meets/{meet_id}/locations':
+    post:
+      tags:
+        - meets
+      summary: Adds a location to a meet
+      operationId: createLocationByMeet
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The location to add
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetLocation'
+      responses:
+        '201':
+          description: The meet that was modified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  '/api/v1/meets/{meet_id}/locations/{location_id}':
+    put:
+      tags:
+        - meets
+      summary: Updates a location
+      operationId: updateMeetLocationById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: location_id
+          description: The location id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The location information
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeetLocation'
+      responses:
+        '201':
+          description: The meet data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    delete:
+      tags:
+        - meets
+      summary: Deletes a Location
+      operationId: deleteMeetLocationById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: location_id
+          description: The location id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The meet data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  '/api/v1/meets/{meet_id}/notes':
+    post:
+      tags:
+        - meets
+      summary: Adds a note to a meet
+      operationId: createNoteByMeet
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The note to add
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                type:
+                  type: string
+                  enum:
+                    - DATA
+                    - ASSESSMENT
+                    - PLAN
+                    - MISC
+            examples:
+              DATA:
+                value:
+                  note: I need a ride there.
+                  type: DATA
+              ASSESSMENT:
+                value:
+                  note: I need a ride there.
+                  type: ASSESSMENT
+              PLAN:
+                value:
+                  note: I need a ride there.
+                  type: PLAN
+              MISC:
+                value:
+                  note: I need a ride there.
+                  type: MISC
+      responses:
+        '201':
+          description: The meet that was modified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    get:
+      tags:
+        - meets
+      summary: Gets the notes for a meeting
+      operationId: getNotes
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: All notes for meet
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MeetNote'
+  '/api/v1/meets/{meet_id}/notes/{note_id}':
+    get:
+      tags:
+        - meets
+      summary: Gets the details of a meeting notes
+      operationId: getNoteById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: number
+        - in: path
+          name: note_id
+          description: The note id
+          required: true
+          schema:
+            type: number
+      responses:
+        '200':
+          description: Selected note of meet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetNote'
+    put:
+      tags:
+        - meets
+      summary: Updates a note
+      operationId: updateNoteById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: note_id
+          description: The note id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The note information
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+            examples:
+              updateNote:
+                value:
+                  note: I need help filling out paperwork.
+                  type: MISC
+                  id: 1
+              updateType:
+                value:
+                  note: I need a ride there.
+                  type: PLAN
+                  id: 1
+      responses:
+        '201':
+          description: The updated meet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+    delete:
+      tags:
+        - meets
+      summary: Deletes a Note
+      operationId: deleteNoteById
+      parameters:
+        - in: path
+          name: meet_id
+          description: The meet id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: note_id
+          description: The note id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The meet data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meet'
+  /api/v1/fs:
+    post:
+      tags:
+        - files
+      summary: (DEBUG ONLY) uploads a file to S3
+      description: This is a testing endpoint. It will NOT function in production. Do NOT use in clients!
+      security: []
+      operationId: uploadFile
+      requestBody:
+        description: The file upload
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: the uuid assigned to the file. Used for subsequent requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uuid:
+                    type: string
+  '/api/v1/fs/{uuid}':
+    get:
+      tags:
+        - files
+      summary: (DEBUG ONLY) gets the file referenced by UUID from S3
+      description: This is a testing endpoint. It will NOT function in production. Do NOT use in clients!
+      security: []
+      operationId: getFileByUUID
+      parameters:
+        - in: path
+          name: uuid
+          description: The uuid referencing the file
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+    delete:
+      tags:
+        - files
+      summary: (DEBUG ONLY) deletes the file referenced by UUID from S3
+      description: This is a testing endpoint. It will NOT function in production. Do NOT use in clients!
+      security: []
+      operationId: deleteFileByUUID
+      parameters:
+        - in: path
+          name: uuid
+          description: The uuid referencing the file
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: 'No response, just status codes or error message'
+          content:
+            application/json:
+              schema:
+                type: object
+  '/api/v1/fs/{uuid}/temp':
+    get:
+      tags:
+        - files
+      summary: (DEBUG ONLY) Generates a temporary file key
+      description: This is a testing endpoint. It will NOT function in production. Do NOT use in clients!
+      security: []
+      operationId: getTempFileKeyByUUID
+      parameters:
+        - in: path
+          name: uuid
+          description: The uuid referencing the file
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file key
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+  '/api/v1/fs/temp/{key}':
+    get:
+      tags:
+        - files
+      summary: (DEBUG ONLY) Gets the file from the temp file key
+      description: This is a testing endpoint. It will NOT function in production. Do NOT use in clients!
+      security: []
+      operationId: getFileByTempKey
+      parameters:
+        - in: path
+          name: key
+          description: The uuid referencing the file
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file key
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  '/api/v1/verification/{verification_id}':
+    put:
+      tags:
+        - verification
+      summary: Sets the communication channel and OTP
+      description: 'This endpoint serves two functions. 1 it accepts the channel value, which is used to select the communication channel that will recieve the OTP code. It also accepts the OTP code itself to complete verification'
+      operationId: updateVerificationById
+      parameters:
+        - in: path
+          name: verification_id
+          description: The verification id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: The channel or OTP value
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: string
+                otp:
+                  type: string
+      responses:
+        '200':
+          description: 'Setting the channel was accepted, or setting the OTP was accepted'
+        '300':
+          description: If another verification step is requred then you will get another VerificationRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationRequest'
+  /api/v1/billables:
+    get:
+      tags:
+        - billables
+      summary: Lists billables
+      operationId: listBillables
+      responses:
+        '200':
+          description: List of billables
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ListEnvelope'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Billable'
+    post:
+      tags:
+        - billables
+      summary: (DEBUG ONLY!!) Creates a billable
+      operationId: createBillable
+      requestBody:
+        description: The billable information
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillableCreate'
+      responses:
+        '201':
+          description: the created billable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Billable'
+  /api/v1/time-tables:
+    get:
+      tags:
+        - time-tables
+      summary: Returns the availability given the search params
+      description: Searches the availability tables.
+      operationId: getTimeTablesBySearchParams
+      parameters:
+        - in: query
+          name: start
+          description: The start of the time period to search
+          required: true
+          schema:
+            type: string
+            description: ISO8601 date string
+        - in: query
+          name: end
+          description: The end of the time period to search
+          required: true
+          schema:
+            type: string
+            description: ISO8601 date string
+        - in: query
+          name: role_type
+          description: The role type of users to search
+          required: false
+          schema:
+            type: string
+            description: The role type of the users to search
+        - in: query
+          name: org_id
+          description: organization id of users to search
+          schema:
+            type: number
+            description: organization id
+      responses:
+        '200':
+          description: List of time blocks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ListEnvelope'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TimeTable'
+    post:
+      tags:
+        - time-tables
+      summary: (DEBUG ONLY) Creates a timeblock for a user
+      operationId: createTimeBlock
+      requestBody:
+        description: The block
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: number
+                start:
+                  type: string
+                  description: ISO8601 datetime string
+                end:
+                  type: string
+                  description: ISO8601 datetime string
+      responses:
+        '201':
+          description: the created time block
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeBlock'
+  /api/v1/reports/billables.csv:
+    get:
+      tags:
+        - reporting
+      summary: Lists the billables by date range
+      operationId: reportBillables
+      parameters:
+        - in: query
+          name: start
+          description: Begining of the period to search
+          schema:
+            type: string
+            description: iso8601 datetime
+            example: '2022-05-01T00:00:00.000Z'
+          required: true
+        - in: query
+          name: end
+          description: End of the period to search
+          schema:
+            type: string
+            description: iso8601 datetime
+            example: '2022-05-31T23:59:59.999Z'
+          required: true
+      responses:
+        default:
+          description: CSV of the requested data
+          content:
+            text/csv:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        password:
+          refreshUrl: /api/v1/oauth/token
+          tokenUrl: /api/v1/oauth/token
+          scopes:
+            all: Scopes is ignored currently
+  schemas:
+    AuthToken:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: Token used to authenticate requests.
+        access_token_expires_at:
+          type: string
+          description: ISO8601 timestamp when this token expires
+        refresh_token:
+          type: string
+          description: Token used to reauthenticate after the access_token expires
+        refresh_token_expires_at:
+          type: string
+          description: ISO8601 timestamp when this token expires
+    AuthRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: The username of the user you are trying to login
+        password:
+          type: string
+          description: The user's password
+        refresh_token:
+          type: string
+          description: The refresh token
+        client_id:
+          type: string
+          description: The client's id
+        client_secret:
+          type: string
+          description: The client's auth secret
+        grant_type:
+          type: string
+          description: Supports 'password' and 'refresh_token'
+    CareTeam:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The mongo _id value
+        user_id:
+          type: string
+        created_at:
+          description: ISO8601 datetime
+          type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/CareTeamMember'
+    InviteStatusEnum:
+      type: string
+      enum:
+        - not_accepted
+        - accepted
+        - declined
+    CareTeamMember:
+      type: object
+      properties:
+        user_id:
+          type: string
+          description: The ID of the provider if available
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        status:
+          $ref: '#/components/schemas/InviteStatusEnum'
+        hash:
+          type: string
+          description: Generated by the server
+        created_on:
+          type: string
+          description: ISO8601 datetime
+    CareTeamMemberRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+          description: The ID of the provider if available
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+    CheckIn:
+      type: object
+      properties:
+        userId:
+          type: number
+        sobriety_reason:
+          type: string
+        last_use_date:
+          type: string
+        what_happened:
+          type: string
+        emoji_mood:
+          type: number
+        overall_mood:
+          type: array
+          items:
+            type: string
+        challengeId:
+          type: string
+    CheckInShare:
+      type: object
+      properties:
+        userId:
+          type: integer
+          format: int64
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone_number:
+          type: string
+    UpdatedItem:
+      type: object
+      properties:
+        acknowledged:
+          type: boolean
+        modifiedCount:
+          type: number
+        upsertedId:
+          type: number
+        upsertedCount:
+          type: number
+        matchedCount:
+          type: number
+    Credential:
+      type: object
+      properties:
+        credential_type:
+          type: string
+          description: Flag mapped to a credential type
+        credential_title:
+          type: string
+          description: Description that is human-readable and designed to show to the end-user
+    CredentialCore:
+      type: object
+      allOf:
+        - type: object
+          properties:
+            id:
+              type: string
+              description: ID of the credential to reference
+        - $ref: '#/components/schemas/Credential'
+    CredentialGet:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - type: object
+          properties:
+            user:
+              type: object
+              $ref: '#/components/schemas/UserConcise'
+            status:
+              type: string
+              enum:
+                - new
+                - pending
+                - validated
+                - deleted
+                - abandoned
+    CredentialsFileNew:
+      type: object
+      properties:
+        file_key:
+          type: string
+          description: The flag to tie to the file to make a distinction between types of requested uploads
+        file_title:
+          type: string
+          description: Supplemental text describing the desired file to be uploaded
+        placeholder:
+          type: string
+          description: The label to show inline to help describe the expected value
+    CredentialsFile:
+      type: object
+      properties:
+        file_id:
+          type: string
+          description: File ID of the file uploaded
+        file_src:
+          type: string
+          description: Path to retrieve the file from the API
+        uploaded_date:
+          type: string
+          description: Date and time of the upload occuring
+        size_kb:
+          type: number
+          description: Size of the upload (in kb)
+    CredentialsDL:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - $ref: '#/components/schemas/CredentialsDLInput'
+        - $ref: '#/components/schemas/CredentialGet'
+        - type: object
+          properties:
+            credential_type:
+              type: string
+              enum:
+                - drivers_license
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFile'
+    CredentialsDLInput:
+      type: object
+      allOf:
+        - type: object
+          required:
+            - state
+            - number
+            - issue_date
+            - expiry_date
+          properties:
+            state:
+              type: string
+              description: State where Drivers License was issued
+            number:
+              type: string
+              description: Drivers License number
+            issue_date:
+              type: string
+              description: Issue date of Driver's License
+            expiry_date:
+              type: string
+              description: Expiration date of Driver's License
+    CredentialsInsurance:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - $ref: '#/components/schemas/CredentialsInsuranceInput'
+        - $ref: '#/components/schemas/CredentialGet'
+        - type: object
+          properties:
+            credential_type:
+              type: string
+              enum:
+                - medical_insurance
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFile'
+    CredentialsInsuranceInput:
+      type: object
+      allOf:
+        - type: object
+          required:
+            - insurance_company
+            - member_id
+            - group_id
+          properties:
+            insurance_company:
+              type: string
+              enum:
+                - Blue Cross Blue Shield
+                - Medica
+                - MN Cares
+              description: Insurance Company holding the policy
+            member_id:
+              type: string
+              description: Member ID from the cardholder
+            group_id:
+              type: string
+              description: Group ID for the policy
+            plan_id:
+              type: string
+              description: Plan ID for the policy
+            relationship:
+              type: string
+              enum:
+                - Self
+                - Spouse
+                - Parent/Guardian
+                - Other
+    CredentialsCPRS:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - $ref: '#/components/schemas/CredentialsCPRSInput'
+        - $ref: '#/components/schemas/CredentialGet'
+        - type: object
+          properties:
+            credential_type:
+              type: string
+              enum:
+                - cprs
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFile'
+    CredentialsCPRSInput:
+      type: object
+      allOf:
+        - type: object
+          required:
+            - issue_organization
+            - mcb_id
+            - issue_date
+            - expiry_date
+          properties:
+            issue_organization:
+              type: string
+              description: Organization that issued the Credential
+              enum:
+                - Minnesota Certification Board
+                - Refocus Recovery
+                - Other
+            mcb_id:
+              type: string
+              description: ID of the Certificate
+            issue_date:
+              type: string
+              description: Issue date of Certificate
+            expiry_date:
+              type: string
+              description: Expiration date of Certificate
+    CredentialsCPRSR:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - $ref: '#/components/schemas/CredentialsCPRSRInput'
+        - $ref: '#/components/schemas/CredentialGet'
+        - type: object
+          properties:
+            credential_type:
+              type: string
+              enum:
+                - cprs-r
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFile'
+    CredentialsCPRSRInput:
+      type: object
+      allOf:
+        - type: object
+          required:
+            - issue_organization
+            - mcb_id
+            - issue_date
+            - expiry_date
+          properties:
+            issue_organization:
+              type: string
+              description: Organization that issued the Credential
+              enum:
+                - Minnesota Certification Board
+                - Refocus Recovery
+                - Other
+            mcb_id:
+              type: string
+              description: ID of the Certificate
+            issue_date:
+              type: string
+              description: Issue date of Certificate
+            expiry_date:
+              type: string
+              description: Expiration date of Certificate
+    CredentialsLADC:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/CredentialCore'
+        - $ref: '#/components/schemas/CredentialsLADCInput'
+        - $ref: '#/components/schemas/CredentialGet'
+        - type: object
+          properties:
+            credential_type:
+              type: string
+              enum:
+                - ladc
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFile'
+    CredentialsLADCInput:
+      type: object
+      allOf:
+        - type: object
+          required:
+            - issue_organization
+            - number
+            - issue_date
+            - expiry_date
+          properties:
+            issue_organization:
+              type: string
+              description: Organization that issued the Credential
+              enum:
+                - Minnesota Certification Board
+                - Refocus Recovery
+                - Other
+            number:
+              type: string
+              description: LADC License number
+            issue_date:
+              type: string
+              description: Issue date of Certificate
+            expiry_date:
+              type: string
+              description: Date the LADC credential expires
+    CredentialsAny:
+      type: object
+      anyOf:
+        - $ref: '#/components/schemas/CredentialsDL'
+        - $ref: '#/components/schemas/CredentialsInsurance'
+        - $ref: '#/components/schemas/CredentialsCPRS'
+        - $ref: '#/components/schemas/CredentialsCPRSR'
+        - $ref: '#/components/schemas/CredentialsLADC'
+    CredentialsAnyInput:
+      type: object
+      anyOf:
+        - $ref: '#/components/schemas/CredentialsDLInput'
+        - $ref: '#/components/schemas/CredentialsInsuranceInput'
+        - $ref: '#/components/schemas/CredentialsCPRSInput'
+        - $ref: '#/components/schemas/CredentialsCPRSRInput'
+        - $ref: '#/components/schemas/CredentialsLADCInput'
+    CredentialsField:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The key to use when updating the specific value for a specific field on the credential object
+        title:
+          type: string
+          description: The title to show above to help describe the input field
+        placeholder:
+          type: string
+          description: The label to show inline to help describe the expected value
+        type:
+          type: string
+          enum:
+            - short_text
+            - long_text
+            - date
+            - datetime
+            - time
+            - number
+            - enum
+          description: The type of value expected for input
+        options:
+          type: array
+          items:
+            type: string
+          description: 'If the type is enum, then this will contain a list of values for the UI to display as options'
+        required:
+          type: boolean
+          description: If field is required or not
+    CredentialsList:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/Credential'
+        - type: object
+          properties:
+            inputs:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsField'
+            files:
+              type: array
+              items:
+                $ref: '#/components/schemas/CredentialsFileNew'
+    Photo:
+      type: object
+      properties:
+        uri:
+          description: URI to the user's photo
+          type: string
+    UserConcise:
+      type: object
+      properties:
+        id:
+          type: integer
+        first_name:
+          type: string
+        last_name:
+          type: string
+    User:
+      allOf:
+        - $ref: '#/components/schemas/UserConcise'
+        - type: object
+          properties:
+            email:
+              type: string
+            email_verified:
+              type: boolean
+            phone:
+              type: string
+            phone_verified:
+              type: boolean
+            date_of_birth:
+              type: string
+            gender:
+              type: string
+              enum:
+                - MALE
+                - FEMALE
+                - NON-BINARY
+              example: MALE
+            photo_url:
+              type: string
+            intended_role:
+              type: string
+            roles:
+              type: array
+              items:
+                $ref: '#/components/schemas/Role'
+            relationships:
+              type: array
+              items:
+                $ref: '#/components/schemas/Relationship'
+    UserCreate:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        phone:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        date_of_birth:
+          type: string
+        gender:
+          type: string
+          enum:
+            - MALE
+            - FEMALE
+            - NON-BINARY
+          example: MALE
+        intended_role:
+          type: string
+    UserUpdate:
+      allOf:
+        - $ref: '#/components/schemas/UserCreate'
+        - type: object
+          properties:
+            password:
+              type: string
+              description: required if new_password is supplied
+            new_password:
+              type: string
+    UserUpdateError:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+    UserResetPassword:
+      type: object
+      properties:
+        email_address:
+          type: string
+    UserProcessResetPassword:
+      type: object
+      properties:
+        new_password:
+          type: string
+        new_password_confirm:
+          type: string
+        hash:
+          type: string
+    ApiResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        type:
+          type: string
+        message:
+          type: string
+    ListEnvelope:
+      type: object
+      properties:
+        page:
+          description: The page that we are currently on. Starting from 1
+          type: number
+        page_count:
+          description: The number of pages available
+          type: number
+        items_per_page:
+          description: The number of items in each page
+          type: number
+        items_total:
+          description: The total number of items available
+          type: number
+        items:
+          description: The list of items
+          type: array
+          items:
+            type: object
+    Meet:
+      allOf:
+        - $ref: '#/components/schemas/MeetBase'
+        - type: object
+          properties:
+            id:
+              type: integer
+            state:
+              type: string
+              enum:
+                - SOME_COMPLETED
+                - ALL_COMPLETED
+                - COMPLETED
+                - CANCELED
+            owner_id:
+              type: integer
+              description: owner user id
+            start_time_actual:
+              type: string
+              example: 2023-05-14T10:20:00.000Z
+              description: ios8601 timestamp
+            end_time_actual:
+              type: string
+              example: 2023-05-14T11:30:00.000Z
+              description: ios8601 timestamp
+            created_on:
+              type: string
+              description: 'ios8601 timestamp, when this appointment was created'
+            billable_id:
+              type: integer
+              description: links to public.billable row when meeting is marked COMPLETED
+            locations:
+              type: array
+              items:
+                $ref: '#/components/schemas/MeetLocation'
+            attendees:
+              type: array
+              items:
+                $ref: '#/components/schemas/MeetAttendee'
+            notes:
+              type: array
+              items:
+                $ref: '#/components/schemas/MeetNote'
+    MeetAttendee:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        state:
+          type: string
+          enum:
+            - ACCEPTED
+            - DECLINED
+            - NO_RESPONSE
+    MeetBase:
+      type: object
+      properties:
+        title:
+          type: string
+          example: Drive to DMV
+        description:
+          type: string
+          example: I need help getting my driver's license
+        start_time_planned:
+          type: string
+          example: 2023-05-14T10:00:00.000Z
+          description: ios8601 timestamp
+        end_time_planned:
+          type: string
+          example: 2023-05-14T10:00:00.000Z
+          description: ios8601 timestamp
+        billing_code:
+          type: string
+          description: the insurance billing code for this appointment
+    MeetUpdate:
+      allOf:
+        - $ref: '#/components/schemas/MeetBase'
+        - type: object
+          properties:
+            id:
+              type: integer
+            state:
+              type: string
+              example: COMPLETED
+              enum:
+                - SOME_ACCEPTED
+                - ALL_ACCEPTED
+                - COMPLETED
+                - CANCELED
+            owner_id:
+              type: integer
+              description: owner user id
+            start_time_actual:
+              type: string
+              example: 2023-05-14T10:20:00.000Z
+              description: ios8601 timestamp
+            end_time_actual:
+              type: string
+              example: 2023-05-14T11:30:00.000Z
+              description: ios8601 timestamp
+            created_on:
+              type: string
+              description: 'ios8601 timestamp, when this appointment was created'
+    MeetLocation:
+      type: object
+      properties:
+        id:
+          type: integer
+        order:
+          type: integer
+        name:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        street1:
+          type: string
+        street2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipcode:
+          type: string
+        country:
+          type: string
+    MeetNote:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        created_on:
+          description: The datetime when note was created
+          type: string
+        note:
+          type: string
+        type:
+          type: string
+          enum:
+            - DATA
+            - ASSESSMENT
+            - PLAN
+            - MISC
+    VerificationRequest:
+      type: object
+      properties:
+        verification_id:
+          description: A cryptographically secure id that represents this verification instance
+          type: string
+        channels:
+          description: A list of supported communication methods
+          type: array
+          items:
+            type: string
+        expires_on:
+          description: The date and time that this verification expires on
+          type: string
+    Relationship:
+      type: object
+      properties:
+        id:
+          type: number
+        party1_type:
+          type: string
+        party1_id:
+          type: number
+        party2_type:
+          type: string
+        party2_id:
+          type: number
+        role:
+          $ref: '#/components/schemas/Role'
+        status:
+          type: string
+          description: ACTIVE | INACTIVE
+    RelationshipCreate:
+      type: object
+      properties:
+        party1_type:
+          type: string
+        party1_id:
+          type: number
+        party2_type:
+          type: string
+        party2_id:
+          type: number
+        role_type:
+          type: string
+          description: UNVERIFIED | CLIENT | PROVIDER | ADMIN | RCO_ADMIN | BANNED
+    Role:
+      type: object
+      properties:
+        id:
+          type: number
+        user_id:
+          type: number
+        role:
+          type: string
+          description: UNVERIFIED | CLIENT | PROVIDER | ADMIN | RCO_ADMIN | BANNED
+    Billable:
+      type: object
+      properties:
+        id:
+          type: number
+          description: auto incremented
+        status:
+          type: string
+          description: NEW | PENDING | FAILED | REJECTED? | COLLECTED?
+        client_id:
+          type: number
+          description: id to the client user
+        client_first_name:
+          type: string
+          description: Client's first name
+        client_last_name:
+          type: string
+          description: Client's last name
+        provider_id:
+          type: string
+          description: id to the provider user
+        provider_first_name:
+          type: string
+          description: Provider's first name
+        provider_last_name:
+          type: string
+          description: Provider's last name
+        rco_org_id:
+          type: number
+          description: ID to the org that provider worked for
+        insurance_company_id:
+          type: number
+          description: ID of the insurance company
+        insurance_id:
+          type: number
+          description: ID to the insurance company or credential?
+        insurance_member_id:
+          type: string
+          description: ID from the insurance card
+        insurance_group_id:
+          type: string
+          description: ID from the insurance card
+        created_on:
+          type: string
+          description: ISO8601 Date when this billable was created
+        service_start_time:
+          type: string
+          description: When the service was started
+        service_end_time:
+          type: string
+          description: When the service was completed
+        service_units:
+          type: number
+          description: number of service units
+        billing_code:
+          type: string
+          description: the billing code hardcoded to H0038 for now
+        notes_data:
+          type: string
+          description: The data part of notes DAP
+        notes_assessment:
+          type: string
+          description: The assessment part of notes DAP
+        notes_plan:
+          type: string
+          description: The plan part of DAP
+        invoiced_amount:
+          type: number
+          description: value of pay requested in pennies
+        paid_amount:
+          type: number
+          description: value of amount paid in pennies
+    BillableCreate:
+      type: object
+      properties:
+        client_id:
+          type: number
+          description: id to the client user
+        client_first_name:
+          type: string
+          description: Client's first name
+        client_last_name:
+          type: string
+          description: Client's last name
+        provider_id:
+          type: string
+          description: id to the provider user
+        provider_first_name:
+          type: string
+          description: Provider's first name
+        provider_last_name:
+          type: string
+          description: Provider's last name
+        rco_org_id:
+          type: number
+          description: ID to the org that provider worked for
+        insurance_company_id:
+          type: number
+          description: ID of the insurance company
+        insurance_id:
+          type: number
+          description: ID to the insurance company or credential?
+        insurance_member_id:
+          type: string
+          description: ID from the insurance card
+        insurance_group_id:
+          type: string
+          description: ID from the insurance card
+        service_start_time:
+          type: string
+          description: When the service was started
+        service_end_time:
+          type: string
+          description: When the service was completed
+        service_units:
+          type: number
+          description: number of service units
+        billing_code:
+          type: string
+          description: the billing code hardcoded to H0038 for now
+        notes_data:
+          type: string
+          description: The data part of notes DAP
+        notes_assessment:
+          type: string
+          description: The assessment part of notes DAP
+        notes_plan:
+          type: string
+          description: The plan part of DAP
+        invoiced_amount:
+          type: number
+          description: value of pay requested in pennies
+        paid_amount:
+          type: number
+          description: value of amount paid in pennies
+    TimeBlock:
+      type: object
+      properties:
+        id:
+          type: number
+        user_id:
+          type: number
+        type:
+          description: 'For now will be ''UNAVAILABLE'', describes the kind of Time Table'
+          type: string
+        scope:
+          description: A list of kinds of activities this time block represents. For now will be an empty array
+          type: array
+          items:
+            type: string
+        start:
+          description: ISO8601 datetime string indicating the start of the block
+          type: string
+        end:
+          description: ISO8601 datetime string indicating the end of the block
+          type: string
+    TimeTable:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id:
+              type: number
+            first_name:
+              type: string
+            last_name:
+              type: string
+            photo_url:
+              type: string
+        time_blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeBlock'
